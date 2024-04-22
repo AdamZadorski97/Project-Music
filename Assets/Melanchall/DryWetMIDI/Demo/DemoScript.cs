@@ -19,6 +19,7 @@ using Sirenix.OdinInspector;
 using Crosstales.FB;
 using Crosstales.FB.Wrapper;
 using System.Collections;
+using UnityEngine.VFX;
 
 public class DemoScript : MonoBehaviour
 {
@@ -44,6 +45,8 @@ public class DemoScript : MonoBehaviour
     public Transform noteButtonParrent;
     public int noteButtonChannel;
     public List<GameObject> activeNotes = new List<GameObject>();
+    public VisualEffect spawnCubeEffect;
+    public Gradient vfxGradient;
     void Awake()
     {
 
@@ -343,7 +346,12 @@ public class DemoScript : MonoBehaviour
         Color noteColor = gradient.Evaluate(colorPosition);
         cube.GetComponent<Renderer>().material.color = noteColor;
         _currentNotePosition = cube.transform.position;
-        cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
+
+        spawnCubeEffect.SetGradient("Color", vfxGradient);
+  
+        spawnCubeEffect.Play();
+
+     //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
     }
     bool wasOffset;
  
