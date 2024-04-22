@@ -20,6 +20,7 @@ using Crosstales.FB;
 using Crosstales.FB.Wrapper;
 using System.Collections;
 using UnityEngine.VFX;
+using UnityEngine.VFX.Utility;
 
 public class DemoScript : MonoBehaviour
 {
@@ -47,6 +48,7 @@ public class DemoScript : MonoBehaviour
     public List<GameObject> activeNotes = new List<GameObject>();
     public VisualEffect spawnCubeEffect;
     public Gradient vfxGradient;
+    public Transform VfxSpawnPosition;
     void Awake()
     {
 
@@ -230,7 +232,7 @@ public class DemoScript : MonoBehaviour
         }
 
         var midiFile = patternBuilder.Build().ToFile(TempoMap.Default);
-       // Debug.Log("Test MIDI file created.");
+        // Debug.Log("Test MIDI file created.");
 
         return midiFile;
     }
@@ -242,20 +244,20 @@ public class DemoScript : MonoBehaviour
         _playback.NotesPlaybackStarted += OnNotesPlaybackStarted;
         _playback.NotesPlaybackFinished += OnNotesPlaybackFinished;
 
-       // Debug.Log("Playback initialized.");
+        // Debug.Log("Playback initialized.");
     }
 
 
     private void StartPlayback()
     {
-       // Debug.Log("Starting playback...");
+        // Debug.Log("Starting playback...");
         _playback.Start();
         _playback.Speed = 1f;
     }
 
     private void OnNotesPlaybackFinished(object sender, NotesEventArgs e)
     {
-     //   LogNotes("Notes finished:", e);
+        //   LogNotes("Notes finished:", e);
     }
     private void InitializeChannelGradients()
     {
@@ -346,15 +348,26 @@ public class DemoScript : MonoBehaviour
         Color noteColor = gradient.Evaluate(colorPosition);
         cube.GetComponent<Renderer>().material.color = noteColor;
         _currentNotePosition = cube.transform.position;
+        Gradient vfxGradient = new Gradient();
+   
+        GradientColorKey[] colorKey = {
+                new GradientColorKey(noteColor, 0),
+                new GradientColorKey(noteColor, 1),
+            };
 
+        GradientAlphaKey[] alphaKey = {
+                new GradientAlphaKey(1.0f, 0.0f),
+                new GradientAlphaKey(0.0f, 1.0f)
+            };
+        vfxGradient.SetKeys(colorKey, alphaKey);
         spawnCubeEffect.SetGradient("Color", vfxGradient);
-  
+        VfxSpawnPosition.position = _currentNotePosition;
         spawnCubeEffect.Play();
 
-     //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
+        //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
     }
     bool wasOffset;
- 
+
     public void SpawnNote(Note note)
     {
         GameObject newNoteButton = Instantiate(noteButton, noteButtonParrent.position, Quaternion.identity, noteButtonParrent);
@@ -369,7 +382,7 @@ public class DemoScript : MonoBehaviour
         }
         newNoteButton.GetComponent<NoteButtonController>().noteKey = noteName.ToUpper(); // Use the modified note name as the key
         newNoteButton.transform.GetChild(0).GetComponent<TMP_Text>().text = noteName;
-        if(wasOffset)
+        if (wasOffset)
         {
             newNoteButton.transform.position += new Vector3(80, 0, 0);
             wasOffset = false;
