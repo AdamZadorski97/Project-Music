@@ -90,7 +90,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speed: 500
-  lifetime: 2
+  lifetime: 1.2
   noteSpawner: {fileID: 0}
   noteKey: 
 --- !u!1 &5857190176593746215

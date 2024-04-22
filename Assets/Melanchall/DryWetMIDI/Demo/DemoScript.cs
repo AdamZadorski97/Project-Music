@@ -22,6 +22,7 @@ using System.Collections;
 using UnityEngine.VFX;
 using UnityEngine.VFX.Utility;
 using Unity.VisualScripting;
+using System.Text.RegularExpressions;
 
 public class DemoScript : MonoBehaviour
 {
@@ -43,7 +44,7 @@ public class DemoScript : MonoBehaviour
     public FileBrowser fileBrowser;
     public GameObject noteButton;
     public Transform noteButtonParrent;
-    public int noteButtonChannel;
+    public List<int> NoteButtonChannels { get; private set; } = new List<int>();
     public List<GameObject> activeNotes = new List<GameObject>();
     public VisualEffect spawnCubeEffect;
     public Gradient vfxGradient;
@@ -68,26 +69,62 @@ public class DemoScript : MonoBehaviour
     private void Start()
     {
         InitializeOutputDevice();
-      StartCoroutine(  DequeueVfx());
-        InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile()));
+        StartCoroutine(DequeueVfx());
+        InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile("mid")));
 
-        StartPlayback();
+        Invoke("StartPlayback", 1);
+    }
+    private List<int> ExtractChannels(string filePath)
+    {
+        // Extract the file name from the path
+        string fileName = Path.GetFileName(filePath);
+
+        // Regular expression to find the channel part in the file name
+        Regex regex = new Regex(@"Channels(\d+(,\d+)*)\)");
+        Match match = regex.Match(fileName);
+
+        List<int> channels = new List<int>();
+        if (match.Success)
+        {
+            // Extract the channel numbers
+            string channelPart = match.Groups[1].Value;
+
+            // Split the channel numbers and convert them to integers
+            string[] channelNumbers = channelPart.Split(',');
+            foreach (string number in channelNumbers)
+            {
+                if (int.TryParse(number, out int channel))
+                {
+                    channels.Add(channel);
+                }
+            }
+        }
+
+        return channels;
     }
 
     public void NewTrack()
     {
-
+        StopAllCoroutines();
         StartCoroutine(ResetTrackCoroutine());
 
     }
     IEnumerator ResetTrackCoroutine()
     {
-
+        
         _playback.Stop();
+        if(_playback!=null)
+        _playback.Dispose();
+        if (_outputDevice != null)
+            _outputDevice.Dispose();
+
+
+        InitializeOutputDevice();
         ResetTrack();
+
         yield return new WaitForSeconds(1f);
         InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile()));
-        yield return new WaitForSeconds(0.1f);
+        yield return new WaitForSeconds(1f);
         StartPlayback();
     }
 
@@ -96,6 +133,7 @@ public class DemoScript : MonoBehaviour
 
     private MidiFile LoadMidiFileFromStreamingAssets(string path)
     {
+        NoteButtonChannels = ExtractChannels(path);
         Debug.Log("Loading MIDI file from StreamingAssets..." + path);
 
         string filePath = path;
@@ -230,6 +268,42 @@ public class DemoScript : MonoBehaviour
         _playback.Loop = true;
         _playback.NotesPlaybackStarted += OnNotesPlaybackStarted;
         _playback.NotesPlaybackFinished += OnNotesPlaybackFinished;
+        DebugMidiNotes(midiFile);
+    }
+
+    public void DebugMidiNotes(MidiFile midiFile)
+    {
+        try
+        {
+            TempoMap tempoMap = midiFile.GetTempoMap();
+            var notes = midiFile.GetNotes();
+            foreach (var note in notes)
+            {
+                if(NoteButtonChannels.Contains(note.Channel))
+                StartCoroutine(SpawnNoteWithDelay(note, tempoMap));
+             
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to read MIDI file or process notes: {ex.Message}");
+        }
+    }
+    private float TicksToSeconds(long ticks, TempoMap tempoMap)
+    {
+        // Get the time in microseconds
+        long microseconds = TimeConverter.ConvertTo<MetricTimeSpan>(ticks, tempoMap).TotalMicroseconds;
+        return microseconds / 1_000_000f; // Convert microseconds to seconds
+    }
+    private float lastSeconds;
+    IEnumerator SpawnNoteWithDelay(Note note, TempoMap tempoMap)
+    {
+        if(lastSeconds== TicksToSeconds(note.Time, tempoMap)) yield break;
+        float seconds = TicksToSeconds(note.Time, tempoMap);
+        lastSeconds = seconds;
+        yield return new WaitForSeconds(seconds);
+        Debug.Log($"Note: {note.NoteName}, Time: {note.Time}, Length: {note.Length}, Velocity: {note.Velocity}");
+        SpawnNote(note);
     }
     private void StartPlayback()
     {
@@ -318,8 +392,7 @@ public class DemoScript : MonoBehaviour
         var lightComponent = volumetricLightBeamHDs[UnityEngine.Random.Range(note.Channel, note.Channel + 2)];
         lightComponent.intensityGlobal = lightIntensity * 4 * intensitySlider.value;
 
-        if (noteButtonChannel == note.Channel)
-            SpawnNote(note);
+
         // Set cube color based on note
         Gradient gradient = _channelGradients[note.Channel];
         float colorPosition = Mathf.InverseLerp(21, 108, note.NoteNumber);
@@ -327,7 +400,7 @@ public class DemoScript : MonoBehaviour
         instantiatedNoteCube.GetComponent<Renderer>().material.color = noteColor;
         _currentNotePosition = instantiatedNoteCube.transform.position;
         lastVFXPosition = _currentNotePosition;
-       
+
         VFXRequest newVfxRequest = new VFXRequest();
         newVfxRequest.Position = _currentNotePosition;
         newVfxRequest.Color = noteColor;
@@ -342,7 +415,7 @@ public class DemoScript : MonoBehaviour
             if (vFXRequests.Count > 0)
             {
                 Debug.Log("PlayVfx");
-               VFXSpawnCoroutine(vFXRequests[0].Position, vFXRequests[0].Color);
+                VFXSpawnCoroutine(vFXRequests[0].Position, vFXRequests[0].Color);
                 vFXRequests.Remove(vFXRequests[0]);
             }
             yield return new WaitForSeconds(0.01f);
@@ -392,9 +465,10 @@ public class DemoScript : MonoBehaviour
 
     public void SpawnNote(Note note)
     {
+
         GameObject newNoteButton = Instantiate(noteButton, noteButtonParrent.position, Quaternion.identity, noteButtonParrent);
         newNoteButton.GetComponent<NoteButtonController>(); // Attach the NoteButtonController script
-        newNoteButton.GetComponent<NoteButtonController>().lifetime = 2f;
+        newNoteButton.GetComponent<NoteButtonController>().lifetime = 1.6f;
         newNoteButton.GetComponent<NoteButtonController>().noteSpawner = this;
 
         string noteName = note.NoteName.ToString();
