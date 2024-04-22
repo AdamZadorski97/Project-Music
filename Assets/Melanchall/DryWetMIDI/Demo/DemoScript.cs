@@ -21,16 +21,15 @@ using Crosstales.FB.Wrapper;
 using System.Collections;
 using UnityEngine.VFX;
 using UnityEngine.VFX.Utility;
+using Unity.VisualScripting;
 
 public class DemoScript : MonoBehaviour
 {
 
     public List<TMP_Text> channelsNoteText;
     private const string OutputDeviceName = "Microsoft GS Wavetable Synth";
-    private const string MidiFilePath = "StreamingAssets/eiffel-65-i-m-blue-20220916155855-nonstop2k.com.mid";
     private OutputDevice _outputDevice;
     private Playback _playback;
-    private Gradient _colorGradient;
     private Gradient[] _channelGradients;
     public bool[] _channelMuteStates = new bool[16];
     private Vector3 _currentNotePosition;
@@ -49,6 +48,8 @@ public class DemoScript : MonoBehaviour
     public VisualEffect spawnCubeEffect;
     public Gradient vfxGradient;
     public Transform VfxSpawnPosition;
+    public GameObject NoteCubePrefab;
+    public Transform cubeParent;
     void Awake()
     {
 
@@ -67,7 +68,7 @@ public class DemoScript : MonoBehaviour
     private void Start()
     {
         InitializeOutputDevice();
-
+      StartCoroutine(  DequeueVfx());
         InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile()));
 
         StartPlayback();
@@ -118,47 +119,18 @@ public class DemoScript : MonoBehaviour
     private ConcurrentQueue<Note> _notesToProcess = new ConcurrentQueue<Note>();
     void Update()
     {
-        try
-        {
-            // Manually parse current time and duration
-            TimeSpan currentTime = ParseTimeSpan(_playback.GetCurrentTime(TimeSpanType.Metric).ToString());
-            TimeSpan endTime = ParseTimeSpan(_playback.GetDuration(TimeSpanType.Metric).ToString());
-
-            // Calculate the slider value
-            if (endTime.TotalSeconds > 0) // Ensure there is a duration to avoid division by zero
-            {
-                float fraction = (float)(currentTime.TotalSeconds / endTime.TotalSeconds);
-                timeSlider.value = fraction;
-            }
-
-            // Update the time display text with zero-padded minutes and seconds
-            timeText.text = $"{currentTime.Minutes:00}:{currentTime.Seconds:00}/{endTime.Minutes:00}:{endTime.Seconds:00}";
-
-
-            if ($"{currentTime.Minutes:00}:{currentTime.Seconds:00}" == $"{endTime.Minutes:00}:{endTime.Seconds:00}")
-            {
-                ResetTrack();
-            }
-        }
-
-
-
-
-
-        catch (Exception ex)
-        {
-            Debug.LogError("Failed to parse time: " + ex.Message);
-        }
-
+        HandleUITime();
+        HandleLightsDims();
+        HandleCameraPosition();
         while (_notesToProcess.TryDequeue(out Note note))
         {
             CreateNoteCube(note);
         }
-        if (cameraTransform != null)
-        {
-            Vector3 targetPosition = new Vector3(_currentNotePosition.x, cameraTransform.position.y, cameraTransform.position.z);
-            cameraTransform.position = Vector3.Lerp(cameraTransform.position, targetPosition, Time.deltaTime * 2.0f);  // Adjust speed as necessary
-        }
+    }
+
+
+    private void HandleLightsDims()
+    {
         foreach (VolumetricLightBeamSD light in volumetricLightBeamHDs)
         {
             if (light.intensityGlobal > 0.2f)
@@ -168,8 +140,43 @@ public class DemoScript : MonoBehaviour
                 light.intensityGlobal -= lightTurnOffSpeed * Time.deltaTime / 10;
             }
         }
-
     }
+
+    private void HandleCameraPosition()
+    {
+        if (cameraTransform != null)
+        {
+            Vector3 targetPosition = new Vector3(_currentNotePosition.x, cameraTransform.position.y, cameraTransform.position.z);
+            cameraTransform.position = Vector3.Lerp(cameraTransform.position, targetPosition, Time.deltaTime * 2.0f);  // Adjust speed as necessary
+        }
+    }
+    private void HandleUITime()
+    {
+        try
+        {
+            TimeSpan currentTime = ParseTimeSpan(_playback.GetCurrentTime(TimeSpanType.Metric).ToString());
+            TimeSpan endTime = ParseTimeSpan(_playback.GetDuration(TimeSpanType.Metric).ToString());
+            if (endTime.TotalSeconds > 0) // Ensure there is a duration to avoid division by zero
+            {
+                float fraction = (float)(currentTime.TotalSeconds / endTime.TotalSeconds);
+                timeSlider.value = fraction;
+            }
+            timeText.text = $"{currentTime.Minutes:00}:{currentTime.Seconds:00}/{endTime.Minutes:00}:{endTime.Seconds:00}";
+            if ($"{currentTime.Minutes:00}:{currentTime.Seconds:00}" == $"{endTime.Minutes:00}:{endTime.Seconds:00}")
+            {
+                ResetTrack();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError("Failed to parse time: " + ex.Message);
+        }
+    }
+
+
+
+
+
 
     TimeSpan ParseTimeSpan(string timeString)
     {
@@ -217,47 +224,33 @@ public class DemoScript : MonoBehaviour
         Debug.Log($"Output device [{OutputDeviceName}] initialized.");
     }
 
-    private MidiFile CreateTestFile()
-    {
-        Debug.Log("Creating test MIDI file...");
-
-        var patternBuilder = new PatternBuilder()
-            .SetNoteLength(MusicalTimeSpan.Eighth)
-            .SetVelocity(SevenBitNumber.MaxValue)
-            .ProgramChange(GeneralMidiProgram.Harpsichord);
-
-        foreach (var noteNumber in SevenBitNumber.Values)
-        {
-            patternBuilder.Note(Melanchall.DryWetMidi.MusicTheory.Note.Get(noteNumber));
-        }
-
-        var midiFile = patternBuilder.Build().ToFile(TempoMap.Default);
-        // Debug.Log("Test MIDI file created.");
-
-        return midiFile;
-    }
-
     private void InitializeFilePlayback(MidiFile midiFile)
     {
         _playback = midiFile.GetPlayback(_outputDevice);
         _playback.Loop = true;
         _playback.NotesPlaybackStarted += OnNotesPlaybackStarted;
         _playback.NotesPlaybackFinished += OnNotesPlaybackFinished;
-
-        // Debug.Log("Playback initialized.");
     }
-
-
     private void StartPlayback()
     {
-        // Debug.Log("Starting playback...");
         _playback.Start();
         _playback.Speed = 1f;
     }
 
     private void OnNotesPlaybackFinished(object sender, NotesEventArgs e)
     {
-        //   LogNotes("Notes finished:", e);
+
+    }
+
+    private void OnNotesPlaybackStarted(object sender, NotesEventArgs e)
+    {
+        foreach (var note in e.Notes)
+        {
+            if (_channelMuteStates[note.Channel]) // Check if the channel is active
+            {
+                _notesToProcess.Enqueue(note);
+            }
+        }
     }
     private void InitializeChannelGradients()
     {
@@ -265,8 +258,6 @@ public class DemoScript : MonoBehaviour
         for (int i = 0; i < _channelGradients.Length; i++)
         {
             _channelGradients[i] = new Gradient();
-
-            // Example gradient initialization, customize this part as needed
             GradientColorKey[] colorKey = {
                 new GradientColorKey(Color.red, 0.2f),
                 new GradientColorKey(Color.green, 0.5f),
@@ -278,20 +269,10 @@ public class DemoScript : MonoBehaviour
                 new GradientAlphaKey(1.0f, 0.5f),
                 new GradientAlphaKey(1.0f, 1.0f)
             };
-
             _channelGradients[i].SetKeys(colorKey, alphaKey);
         }
     }
-    private void OnNotesPlaybackStarted(object sender, NotesEventArgs e)
-    {
-        foreach (var note in e.Notes)
-        {
-            if (_channelMuteStates[note.Channel]) // Check if the channel is active
-            {
-                _notesToProcess.Enqueue(note);
-            }
-        }
-    }
+
     [Button]
     public void ResetTrack()
     {
@@ -306,39 +287,36 @@ public class DemoScript : MonoBehaviour
 
 
 
-    public GameObject NoteCubePrefab;
-    public Transform cubeParent;
+
     private void CreateNoteCube(Note note)
     {
-        Debug.Log("x");
         float noteLengthInSeconds = (float)note.LengthAs<MetricTimeSpan>(_playback.TempoMap).TotalMicroseconds / 1000000f;
         int noteHeight = note.NoteNumber - 60;  // Middle C (C4) is considered as the center line
 
-        // Create and position the cube
-        GameObject cube = Instantiate(NoteCubePrefab, new Vector3(note.TimeAs<MetricTimeSpan>(_playback.TempoMap).TotalMicroseconds / 1000000f, noteHeight, 0), Quaternion.identity);
-        cube.transform.localScale = Vector3.zero;
-        cube.transform.DOScale(new Vector3(noteLengthInSeconds, 1, 1), 0.5f);  // Scale the cube based on note length
-        cube.transform.DOLocalJump(cube.transform.position, 2, 0, 0.5f);
-        cube.name = $"Note {note.NoteName}";  // Rename for easier identification
-        cube.transform.SetParent(cubeParent);
+        GameObject instantiatedNoteCube = Instantiate(NoteCubePrefab, new Vector3(note.TimeAs<MetricTimeSpan>(_playback.TempoMap).TotalMicroseconds / 1000000f, noteHeight, 0), Quaternion.identity);
+        instantiatedNoteCube.transform.localScale = Vector3.zero;
+        instantiatedNoteCube.transform.DOScale(new Vector3(noteLengthInSeconds, 1, 1), 0.5f);  // Scale the cube based on note length
+        instantiatedNoteCube.transform.DOLocalJump(instantiatedNoteCube.transform.position, 2, 0, 0.5f);
+        instantiatedNoteCube.name = $"Note {note.NoteName}";  // Rename for easier identification
+        instantiatedNoteCube.transform.SetParent(cubeParent);
 
-        float normalizedIntensity = 0;
+        float lightIntensity;
         // Normalize the note index and set initial light intensity
         if (note.NoteName.ToString().IndexOf("sharp", StringComparison.OrdinalIgnoreCase) >= 0)
         {
             string updatedNoteName = System.Text.RegularExpressions.Regex.Replace(note.NoteName.ToString(), "sharp", "#", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             channelsNoteText[(int)note.Channel].text = $"CH{note.Channel} {updatedNoteName} {note.Octave}";
-            normalizedIntensity = noteParse.NormalizeNoteIndex(updatedNoteName + note.Octave);
+            lightIntensity = noteParse.NormalizeNoteIndex(updatedNoteName + note.Octave);
         }
         else
         {
             channelsNoteText[(int)note.Channel].text = $"CH{note.Channel} {note.NoteName}{note.Octave}";
-            normalizedIntensity = noteParse.NormalizeNoteIndex(note.NoteName.ToString() + note.Octave);
+            lightIntensity = noteParse.NormalizeNoteIndex(note.NoteName.ToString() + note.Octave);
         }
 
         // Set initial intensity based on normalized note value and then fade out
         var lightComponent = volumetricLightBeamHDs[UnityEngine.Random.Range(note.Channel, note.Channel + 2)];
-        lightComponent.intensityGlobal = normalizedIntensity * 4 * intensitySlider.value;
+        lightComponent.intensityGlobal = lightIntensity * 4 * intensitySlider.value;
 
         if (noteButtonChannel == note.Channel)
             SpawnNote(note);
@@ -346,10 +324,51 @@ public class DemoScript : MonoBehaviour
         Gradient gradient = _channelGradients[note.Channel];
         float colorPosition = Mathf.InverseLerp(21, 108, note.NoteNumber);
         Color noteColor = gradient.Evaluate(colorPosition);
-        cube.GetComponent<Renderer>().material.color = noteColor;
-        _currentNotePosition = cube.transform.position;
+        instantiatedNoteCube.GetComponent<Renderer>().material.color = noteColor;
+        _currentNotePosition = instantiatedNoteCube.transform.position;
+        lastVFXPosition = _currentNotePosition;
+       
+        VFXRequest newVfxRequest = new VFXRequest();
+        newVfxRequest.Position = _currentNotePosition;
+        newVfxRequest.Color = noteColor;
+        vFXRequests.Add(newVfxRequest);
+        //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
+    }
+
+    IEnumerator DequeueVfx()
+    {
+        do
+        {
+            if (vFXRequests.Count > 0)
+            {
+                Debug.Log("PlayVfx");
+               VFXSpawnCoroutine(vFXRequests[0].Position, vFXRequests[0].Color);
+                vFXRequests.Remove(vFXRequests[0]);
+            }
+            yield return new WaitForSeconds(0.01f);
+        } while (true);
+
+
+    }
+
+
+
+    private Vector3 lastVFXPosition;
+    private bool waitForFrame;
+
+    public List<VFXRequest> vFXRequests = new List<VFXRequest>();
+
+    [Serializable]
+    public class VFXRequest
+    {
+        public Vector3 Position;
+        public Color Color;
+    }
+
+    void VFXSpawnCoroutine(Vector3 position, Color noteColor)
+    {
         Gradient vfxGradient = new Gradient();
-   
+
         GradientColorKey[] colorKey = {
                 new GradientColorKey(noteColor, 0),
                 new GradientColorKey(noteColor, 1),
@@ -361,11 +380,14 @@ public class DemoScript : MonoBehaviour
             };
         vfxGradient.SetKeys(colorKey, alphaKey);
         spawnCubeEffect.SetGradient("Color", vfxGradient);
-        VfxSpawnPosition.position = _currentNotePosition;
+        VfxSpawnPosition.position = position;
         spawnCubeEffect.Play();
-
-        //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
     }
+
+
+
+
+
     bool wasOffset;
 
     public void SpawnNote(Note note)
