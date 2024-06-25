@@ -17,12 +17,10 @@ using VLB;
 using UnityEngine.UI;
 using Sirenix.OdinInspector;
 using Crosstales.FB;
-using Crosstales.FB.Wrapper;
 using System.Collections;
 using UnityEngine.VFX;
-using UnityEngine.VFX.Utility;
-using Unity.VisualScripting;
 using System.Text.RegularExpressions;
+using UnityEngine.UIElements;
 
 public class DemoScript : MonoBehaviour
 {
@@ -35,12 +33,10 @@ public class DemoScript : MonoBehaviour
     public bool[] _channelMuteStates = new bool[16];
     private Vector3 _currentNotePosition;
     public Transform cameraTransform;
-    public List<VolumetricLightBeamSD> volumetricLightBeamHDs = new List<VolumetricLightBeamSD>();
+    public List<LightsChannel> lightsChannels;
     public NoteParse noteParse;
-    public float lightTurnOffSpeed;
-    public Slider intensitySlider;
     public TMP_Text timeText;
-    public Slider timeSlider;
+    public UnityEngine.UI.Slider timeSlider;
     public FileBrowser fileBrowser;
     public GameObject noteButton;
     public Transform noteButtonParrent;
@@ -51,11 +47,45 @@ public class DemoScript : MonoBehaviour
     public Transform VfxSpawnPosition;
     public GameObject NoteCubePrefab;
     public Transform cubeParent;
+    private GameConfig gameConfig;
+    public CameraController cameraController;
+    public AnimationCurve shakeCurve;
+    [Serializable]
+    public class LightsChannel
+    {
+        public int channel;
+        public List<VolumetricLightBeamSD> volumetricLightBeamHDs = new List<VolumetricLightBeamSD>();
+    }
+
     void Awake()
     {
 
-        InitializeChannelGradients();
     }
+    private void Start()
+    {
+        SettingsManager.Instance.LoadSettings();
+        gameConfig = SettingsManager.Instance.settings;
+        InitializeOutputDevice();
+        StartCoroutine(DequeueVfx());
+        InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile("mid")));
+        InitializeChannelGradients();
+        Invoke("StartPlayback", 1);
+       
+    }
+    void Update()
+    {
+        HandleUITime();
+        HandleLightsDims();
+        HandleCameraPosition();
+        while (_notesToProcess.TryDequeue(out Note note))
+        {
+            CreateNoteCube(note);
+        }
+    }
+
+
+
+
     private MidiEvent HandleMidiEventPlayback(MidiEvent midiEvent, long absoluteTime)
     {
         // Filter out the event based on channel mute state
@@ -66,14 +96,7 @@ public class DemoScript : MonoBehaviour
         }
         return midiEvent; // Return the event unmodified if not muted
     }
-    private void Start()
-    {
-        InitializeOutputDevice();
-        StartCoroutine(DequeueVfx());
-        InitializeFilePlayback(LoadMidiFileFromStreamingAssets(fileBrowser.OpenSingleFile("mid")));
 
-        Invoke("StartPlayback", 1);
-    }
     private List<int> ExtractChannels(string filePath)
     {
         // Extract the file name from the path
@@ -111,10 +134,10 @@ public class DemoScript : MonoBehaviour
     }
     IEnumerator ResetTrackCoroutine()
     {
-        
+
         _playback.Stop();
-        if(_playback!=null)
-        _playback.Dispose();
+        if (_playback != null)
+            _playback.Dispose();
         if (_outputDevice != null)
             _outputDevice.Dispose();
 
@@ -149,35 +172,24 @@ public class DemoScript : MonoBehaviour
         return midiFile;
     }
 
-    IEnumerator WaitForFile(MidiFile midiFile)
-    {
-        yield return new WaitForSeconds(0.1f);
-
-    }
     private ConcurrentQueue<Note> _notesToProcess = new ConcurrentQueue<Note>();
-    void Update()
-    {
-        HandleUITime();
-        HandleLightsDims();
-        HandleCameraPosition();
-        while (_notesToProcess.TryDequeue(out Note note))
-        {
-            CreateNoteCube(note);
-        }
-    }
 
 
     private void HandleLightsDims()
     {
-        foreach (VolumetricLightBeamSD light in volumetricLightBeamHDs)
+        foreach (LightsChannel lightsChannel in lightsChannels)
         {
-            if (light.intensityGlobal > 0.2f)
-                light.intensityGlobal -= lightTurnOffSpeed * Time.deltaTime;
-            else
+            foreach (VolumetricLightBeamSD light in lightsChannel.volumetricLightBeamHDs)
             {
-                light.intensityGlobal -= lightTurnOffSpeed * Time.deltaTime / 10;
+                if (light.intensityGlobal > gameConfig.lightsMinimumDim)
+                    light.intensityGlobal -= gameConfig.lightsDimsSpeed * Time.deltaTime;
+                else
+                {
+                    light.intensityGlobal -= gameConfig.lightsDimsSpeed * Time.deltaTime / 10;
+                }
             }
         }
+
     }
 
     private void HandleCameraPosition()
@@ -279,9 +291,9 @@ public class DemoScript : MonoBehaviour
             var notes = midiFile.GetNotes();
             foreach (var note in notes)
             {
-                if(NoteButtonChannels.Contains(note.Channel))
-                StartCoroutine(SpawnNoteWithDelay(note, tempoMap));
-             
+                if (NoteButtonChannels.Contains(note.Channel))
+                    StartCoroutine(SpawnNoteWithDelay(note, tempoMap));
+
             }
         }
         catch (Exception ex)
@@ -298,7 +310,7 @@ public class DemoScript : MonoBehaviour
     private float lastSeconds;
     IEnumerator SpawnNoteWithDelay(Note note, TempoMap tempoMap)
     {
-        if(lastSeconds== TicksToSeconds(note.Time, tempoMap)) yield break;
+        if (lastSeconds == TicksToSeconds(note.Time, tempoMap)) yield break;
         float seconds = TicksToSeconds(note.Time, tempoMap);
         lastSeconds = seconds;
         yield return new WaitForSeconds(seconds);
@@ -333,15 +345,15 @@ public class DemoScript : MonoBehaviour
         {
             _channelGradients[i] = new Gradient();
             GradientColorKey[] colorKey = {
-                new GradientColorKey(Color.red, 0.2f),
-                new GradientColorKey(Color.green, 0.5f),
-                new GradientColorKey(Color.blue, 0.7f)
+                new GradientColorKey(gameConfig.cubeNoteGradientColor1, gameConfig.cubeNoteGradientTime1),
+                  new GradientColorKey(gameConfig.cubeNoteGradientColor2, gameConfig.cubeNoteGradientTime2),
+                   new GradientColorKey(gameConfig.cubeNoteGradientColor3, gameConfig.cubeNoteGradientTime3),
             };
 
             GradientAlphaKey[] alphaKey = {
-                new GradientAlphaKey(1.0f, 0.0f),
-                new GradientAlphaKey(1.0f, 0.5f),
-                new GradientAlphaKey(1.0f, 1.0f)
+                new GradientAlphaKey(gameConfig.cubeNoteGradientColor1.w,gameConfig.cubeNoteGradientTime1),
+                new GradientAlphaKey(gameConfig.cubeNoteGradientColor2.w, gameConfig.cubeNoteGradientTime2),
+                new GradientAlphaKey(gameConfig.cubeNoteGradientColor3.w, gameConfig.cubeNoteGradientTime3)
             };
             _channelGradients[i].SetKeys(colorKey, alphaKey);
         }
@@ -365,14 +377,24 @@ public class DemoScript : MonoBehaviour
     private void CreateNoteCube(Note note)
     {
         float noteLengthInSeconds = (float)note.LengthAs<MetricTimeSpan>(_playback.TempoMap).TotalMicroseconds / 1000000f;
-        int noteHeight = note.NoteNumber - 60;  // Middle C (C4) is considered as the center line
+        float noteHeight = note.NoteNumber - 60 * gameConfig.noteYPositionMultiplier;  // Middle C (C4) is considered as the center line
 
         GameObject instantiatedNoteCube = Instantiate(NoteCubePrefab, new Vector3(note.TimeAs<MetricTimeSpan>(_playback.TempoMap).TotalMicroseconds / 1000000f, noteHeight, 0), Quaternion.identity);
         instantiatedNoteCube.transform.localScale = Vector3.zero;
-        instantiatedNoteCube.transform.DOScale(new Vector3(noteLengthInSeconds, 1, 1), 0.5f);  // Scale the cube based on note length
-        instantiatedNoteCube.transform.DOLocalJump(instantiatedNoteCube.transform.position, 2, 0, 0.5f);
+        instantiatedNoteCube.transform.DOScale(new Vector3(noteLengthInSeconds, 1 * gameConfig.cubeNoteScale, 1 * gameConfig.cubeNoteScale), gameConfig.cubeNoteScaleTime);  // Scale the cube based on note length
+        instantiatedNoteCube.transform.DOLocalJump(instantiatedNoteCube.transform.position, gameConfig.cubeNoteJumpPower, 0, gameConfig.cubeNoteJumpTime);
         instantiatedNoteCube.name = $"Note {note.NoteName}";  // Rename for easier identification
         instantiatedNoteCube.transform.SetParent(cubeParent);
+
+
+        // Set cube color based on note
+        Gradient gradient = _channelGradients[note.Channel];
+        float colorPosition = Mathf.InverseLerp(21, 108, note.NoteNumber);
+        Color noteColor = gradient.Evaluate(colorPosition);
+        instantiatedNoteCube.GetComponent<Renderer>().material.color = noteColor;
+        instantiatedNoteCube.GetComponent<Renderer>().material.SetColor("_EmissionColor", noteColor);
+        _currentNotePosition = instantiatedNoteCube.transform.position;
+        lastVFXPosition = _currentNotePosition;
 
         float lightIntensity;
         // Normalize the note index and set initial light intensity
@@ -380,6 +402,7 @@ public class DemoScript : MonoBehaviour
         {
             string updatedNoteName = System.Text.RegularExpressions.Regex.Replace(note.NoteName.ToString(), "sharp", "#", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             channelsNoteText[(int)note.Channel].text = $"CH{note.Channel} {updatedNoteName} {note.Octave}";
+   
             lightIntensity = noteParse.NormalizeNoteIndex(updatedNoteName + note.Octave);
         }
         else
@@ -388,24 +411,33 @@ public class DemoScript : MonoBehaviour
             lightIntensity = noteParse.NormalizeNoteIndex(note.NoteName.ToString() + note.Octave);
         }
 
-        // Set initial intensity based on normalized note value and then fade out
-        var lightComponent = volumetricLightBeamHDs[UnityEngine.Random.Range(note.Channel, note.Channel + 2)];
-        lightComponent.intensityGlobal = lightIntensity * 4 * intensitySlider.value;
+        foreach (LightsChannel lightsChannel in lightsChannels)
+        {
+            if (lightsChannel.channel == note.Channel)
+            {
+                foreach (VolumetricLightBeamSD light in lightsChannel.volumetricLightBeamHDs)
+                {
+
+                    DOTween.To(() => light.intensityGlobal, x => light.intensityGlobal = x, lightIntensity * gameConfig.lightsIntencity, gameConfig.lightsTurnOnSpeed);
+                    light.spotAngle = gameConfig.lightsAngle;
+                    light.color = noteColor;
+                }
+            }
+        }
+
+        if (NoteButtonChannels.Contains(note.Channel))
+        {
+            cameraController.ShakeCamera(gameConfig.cameraShakeTime, gameConfig.cameraShakePower, shakeCurve);
+            cameraController.MoveCamera(new Vector3(0,-2, -30), gameConfig.cameraMoveForwardOnNoteSpawnSpeed, shakeCurve);
+        }
 
 
-        // Set cube color based on note
-        Gradient gradient = _channelGradients[note.Channel];
-        float colorPosition = Mathf.InverseLerp(21, 108, note.NoteNumber);
-        Color noteColor = gradient.Evaluate(colorPosition);
-        instantiatedNoteCube.GetComponent<Renderer>().material.color = noteColor;
-        _currentNotePosition = instantiatedNoteCube.transform.position;
-        lastVFXPosition = _currentNotePosition;
 
-        VFXRequest newVfxRequest = new VFXRequest();
+
+            VFXRequest newVfxRequest = new VFXRequest();
         newVfxRequest.Position = _currentNotePosition;
         newVfxRequest.Color = noteColor;
         vFXRequests.Add(newVfxRequest);
-        //   cube.transform.GetChild(0).GetComponent<ParticleSystem>().startColor = noteColor;
     }
 
     IEnumerator DequeueVfx()
